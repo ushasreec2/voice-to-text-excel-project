@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Voice to Excel Uploader</title>
+  <style>
+    /* [unchanged styles for help box, layout, buttons, etc.] */
+    #help-container {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+
+    #help-box {
+      display: none;
+      position: absolute;
+      top: 50px;
+      right: 0;
+      width: 300px;
+      background-color: #fff8e1;
+      border-left: 4px solid #ffc107;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      z-index: 999;
+    }
+
+    #help-box ul {
+      padding-left: 20px;
+      margin: 0;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f4f8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 50px;
+      color: #333;
+    }
+    h1 {
+      color: #3b5998;
+    }
+    button, textarea, input[type="file"] {
+      margin: 10px;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
+    }
+    button {
+      background-color: #4caf50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    textarea {
+      width: 350px;
+      height: 80px;
+      resize: none;
+    }
+    #response {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+    table {
+      border-collapse: collapse;
+      margin-top: 20px;
+      width: 90%;
+    }
+    table, th, td {
+      border: 1px solid #aaa;
+    }
+    th, td {
+      padding: 8px;
+      text-align: center;
+    }
+    #download-link {
+      margin-top: 15px;
+      display: inline-block;
+      background-color: #007bff;
+      color: white;
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Voice Command & Excel Upload</h1>
+
+  <div id="help-container">
+    <button onclick="toggleHelp()">❓ Help</button>
+    <div id="help-box">
+      <strong>🗣️ Voice Command Tips:</strong>
+      <ul>
+        <li>Insert 50 in cell A1</li>
+        <li>Insert equal A1 plus B1 in cell C1</li>
+        <li>Insert equal sum A1 to A4 in cell A5</li>
+        <li>Insert equal minimum A1 to A4 in cell B5</li>
+        <li>Insert equal average A1 to A10 in cell B1</li>
+        <li>Insert equal square root of A1 in cell B2</li>
+        <li>Insert equal power A1 to 2 in cell C3</li>
+        <li>Insert equal round A1 to 2 decimal in cell C1</li>
+        <li>Insert equal ceil A1 in cell D1</li>
+        <li>Insert equal floor A1 in cell D2</li>
+      </ul>
+    </div>
+  </div>
+
+  <button id="start-mic-btn">🎤 Start Microphone</button><br />
+  <textarea id="mic-output" placeholder="Your speech will appear here..."></textarea><br />
+
+  <input type="file" id="file-input" accept=".xlsx" /><br />
+
+  <button id="upload-btn">📤 Upload & Execute Command</button>
+
+  <div id="response"></div>
+  <div id="sheet-preview"></div>
+  <a id="download-link" style="display: none;" target="_blank">⬇ Download Excel</a>
+
+  <script>
+    let currentFilename = null;
+
+    const micBtn = document.getElementById("start-mic-btn");
+    const micOutput = document.getElementById("mic-output");
+    const fileInput = document.getElementById("file-input");
+    const uploadBtn = document.getElementById("upload-btn");
+    const responseDiv = document.getElementById("response");
+    const previewDiv = document.getElementById("sheet-preview");
+    const downloadLink = document.getElementById("download-link");
+
+    if (!("webkitSpeechRecognition" in window)) {
+      alert("Your browser doesn't support speech recognition.");
+    } else {
+      const recognition = new webkitSpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      micBtn.onclick = () => recognition.start();
+
+      recognition.onstart = () => {
+        micBtn.textContent = "🎙️ Listening...";
+        micBtn.disabled = true;
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        micOutput.value = transcript;
+      };
+
+      recognition.onend = () => {
+        micBtn.textContent = "🎤 Start Microphone";
+        micBtn.disabled = false;
+      };
+
+      recognition.onerror = () => {
+        micBtn.textContent = "🎤 Start Microphone";
+        micBtn.disabled = false;
+      };
+    }
+
+    uploadBtn.onclick = async () => {
+      const voiceText = micOutput.value.trim();
+      const file = fileInput.files[0];
+
+      if (!voiceText || (!file && !currentFilename)) {
+        alert("Please provide a command and an Excel file.");
+        return;
+      }
+
+      const formData = new FormData();
+      if (!currentFilename && file) {
+        formData.append("file", file);
+      } else {
+        formData.append("filename", currentFilename);
+      }
+      formData.append("voice_text", voiceText);
+
+      try {
+        const res = await fetch("http://localhost:5000/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          responseDiv.innerText = `✅ ${data.message}`;
+          currentFilename = data.filename;
+          previewDiv.innerHTML = generatePreviewTable(data.sheet_preview);
+          downloadLink.href = `http://localhost:5000/download/${currentFilename}`;
+          downloadLink.style.display = "inline-block";
+        } else {
+          responseDiv.innerText = `❌ ${data.error}`;
+        }
+      } catch (err) {
+        responseDiv.innerText = "❌ Network error. Is your Flask server running?";
+      }
+    };
+
+    function generatePreviewTable(data) {
+      let table = "<table><thead><tr>";
+      const colLabels = data[0]?.map((_, i) => String.fromCharCode(65 + i)) || [];
+      colLabels.forEach(label => table += `<th>${label}</th>`);
+      table += "</tr></thead><tbody>";
+      data.forEach(row => {
+        table += "<tr>";
+        row.forEach(cell => {
+          table += `<td>${cell !== null ? cell : ""}</td>`;
+        });
+        table += "</tr>";
+      });
+      table += "</tbody></table>";
+      return table;
+    }
+
+    function toggleHelp() {
+      const helpBox = document.getElementById("help-box");
+      helpBox.style.display = helpBox.style.display === "none" ? "block" : "none";
+    }
+  </script>
+</body>
+</html>
